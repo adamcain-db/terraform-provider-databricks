@@ -162,6 +162,80 @@ func TestModelUpdate(t *testing.T) {
 	assert.Equal(t, "updateddescription", d.Get("description"), "Description should be updated")
 }
 
+func TestModelUpdateTags(t *testing.T) {
+	pm := m()
+	pm.Description = "thedescription"
+	gm := m()
+	gm.Description = "updateddescription"
+	d, err := qa.ResourceFixture{
+		Fixtures: []qa.HTTPFixture{
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/mlflow/databricks/registered-models/get?name=xyz",
+				Response: registeredModel{
+					RegisteredModelDatabricks: gm,
+				},
+			},
+			{
+				Method:   "PATCH",
+				Resource: "/api/2.0/mlflow/registered-models/update",
+				ExpectedRequest: Model{
+					Name:        "xyz",
+					Description: "updateddescription",
+					Tags: []Tag{
+						{Key: "key1", Value: "value1"},
+						{Key: "key2", Value: "value2"},
+						{Key: "key3", Value: "value3"},
+					},
+				},
+				Response: gm,
+			},
+			{
+				Method:   "GET",
+				Resource: "/api/2.0/mlflow/databricks/registered-models/get?name=xyz",
+				Response: registeredModel{
+					RegisteredModelDatabricks: gm,
+				},
+			},
+		},
+		Resource:    ResourceMlflowModel(),
+		Update:      true,
+		RequiresNew: true,
+		ID:          "xyz",
+		InstanceState: map[string]string{
+			"name":         "xyz",
+			"tags.#":       "2",
+			"tags.0.key":   "key1",
+			"tags.0.value": "value1",
+			"tags.1.key":   "key2",
+			"tags.1.value": "value2",
+		},
+		HCL: `
+		name = "xyz"
+		description = "updateddescription"
+		tags {
+			key   = "key2"
+			value = "value2"
+		}				
+		tags {
+			key   = "key3"
+			value = "value3"
+		}		
+		`,
+	}.Apply(t)
+
+	assert.NoError(t, err, err)
+	assert.Equal(t, "xyz", d.Id(), "Resource ID should not be empty")
+	assert.Equal(t, "updateddescription", d.Get("description"), "Description should be updated")
+	assert.Equal(t,
+		[]interface{}([]interface{}{
+			map[string]interface{}{"key": "key1", "value": "value1"},
+			map[string]interface{}{"key": "key2", "value": "value2"},
+		}),
+		d.Get("tags"),
+		"Tags should be merged")
+}
+
 func TestModelUpdatePatchError(t *testing.T) {
 	pm := m()
 	pm.Description = "thedescription"

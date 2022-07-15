@@ -2,6 +2,9 @@ package mlflow
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
 
 	"github.com/databricks/terraform-provider-databricks/common"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -32,7 +35,7 @@ type Model struct {
 	UserID               string         `json:"user_id,omitempty" tf:"computed"`
 	LatestVersions       []ModelVersion `json:"latest_versions,omitempty" tf:"computed"`
 	Description          string         `json:"description,omitempty"`
-	Tags                 []Tag          `json:"tags,omitempty"`
+	Tags                 []Tag          `json:"tags,omitempty" tf:"computed"`
 	RegisteredModelID    string         `json:"id,omitempty" tf:"computed,alias:registered_model_id"`
 }
 
@@ -104,7 +107,36 @@ func ResourceMlflowModel() *schema.Resource {
 		},
 		Update: func(ctx context.Context, d *schema.ResourceData, c *common.DatabricksClient) error {
 			var m Model
+			o, n := d.GetChange("tags")
+			old, okOld := o.([]interface{})
+			_, okNew := n.([]interface{})
+			if !okNew || !okOld {
+				return fmt.Errorf("internal type casting error")
+			}
 			common.DataToStructPointer(d, s, &m)
+
+			for _, item := range old {
+				dbByte, _ := json.Marshal(item)
+				var tag Tag
+				_ = json.Unmarshal(dbByte, &tag)
+				m.Tags = append(m.Tags, tag)
+			}
+
+			marked := map[Tag]struct{}{}
+			dedup := []Tag{}
+			for _, d := range m.Tags {
+				if _, ok := marked[d]; !ok {
+					dedup = append(dedup, d)
+					marked[d] = struct{}{}
+				}
+			}
+
+			m.Tags = dedup
+
+			sort.Slice(m.Tags, func(i, j int) bool {
+				return m.Tags[i].Key < m.Tags[j].Key
+			})
+
 			return NewModelsAPI(ctx, c).Update(&m)
 		},
 		Delete: func(ctx context.Context, d *schema.ResourceData, c *common.DatabricksClient) error {
